@@ -1,0 +1,192 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidSlug(slug) {
+      return slug is string && slug.size() >= 3 && slug.size() <= 48 && slug.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidHttpUrl(url) {
+      return url is string && url.size() >= 8 && url.size() <= 2048 && url.matches('^https?://.+');
+    }
+
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidOptionalTimestamp(data, field) {
+      return !(field in data) || data[field] == null || data[field] is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'photoUrl', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && isValidOptionalString(data, 'displayName', 120)
+        && isValidOptionalString(data, 'photoUrl', 512)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLink(data) {
+      return data.keys().hasAll(['id', 'userId', 'slug', 'originalUrl', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userId', 'slug', 'originalUrl', 'title', 'isActive', 'expiresAt', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128
+        && isValidSlug(data.slug)
+        && isValidHttpUrl(data.originalUrl)
+        && isValidOptionalString(data, 'title', 140)
+        && data.isActive is bool
+        && isValidOptionalTimestamp(data, 'expiresAt')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicRoute(data) {
+      return data.keys().hasAll(['slug', 'linkId', 'originalUrl', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['slug', 'linkId', 'originalUrl', 'isActive', 'expiresAt', 'createdAt', 'updatedAt'])
+        && isValidSlug(data.slug)
+        && isValidId(data.linkId)
+        && isValidHttpUrl(data.originalUrl)
+        && data.isActive is bool
+        && isValidOptionalTimestamp(data, 'expiresAt')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClickEvent(data) {
+      return data.keys().hasAll(['slug', 'clickedAt', 'referrer', 'browser', 'os', 'deviceCategory', 'country'])
+        && data.keys().hasOnly(['slug', 'clickedAt', 'referrer', 'browser', 'os', 'deviceCategory', 'country', 'ipHash'])
+        && isValidSlug(data.slug)
+        && data.clickedAt is timestamp
+        && data.referrer is string && data.referrer.size() >= 1 && data.referrer.size() <= 120
+        && data.browser is string && data.browser.size() >= 1 && data.browser.size() <= 40
+        && data.os is string && data.os.size() >= 1 && data.os.size() <= 40
+        && data.deviceCategory in ['Desktop', 'Mobile', 'Tablet', 'Bot']
+        && data.country is string && data.country.size() >= 1 && data.country.size() <= 16
+        && isValidOptionalString(data, 'ipHash', 32);
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoUrl', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /links/{linkId} {
+      allow get: if isSignedIn() && isValidId(linkId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(linkId)
+        && isValidLink(incoming())
+        && incoming().id == linkId
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/public_routes/$(incoming().slug))
+        && getAfter(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.linkId == linkId;
+      allow update: if isSignedIn()
+        && isValidId(linkId)
+        && isValidLink(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['slug', 'originalUrl', 'title', 'isActive', 'expiresAt', 'updatedAt'])
+        && existsAfter(/databases/$(database)/documents/public_routes/$(incoming().slug))
+        && getAfter(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.linkId == linkId;
+      allow delete: if isSignedIn()
+        && isValidId(linkId)
+        && existing().userId == request.auth.uid;
+
+      match /clicks/{clickId} {
+        allow get: if isSignedIn()
+          && isValidId(linkId)
+          && isValidId(clickId)
+          && get(/databases/$(database)/documents/links/$(linkId)).data.userId == request.auth.uid;
+        allow list: if isSignedIn()
+          && isValidId(linkId)
+          && get(/databases/$(database)/documents/links/$(linkId)).data.userId == request.auth.uid;
+        allow create: if isValidId(linkId)
+          && isValidId(clickId)
+          && isValidClickEvent(incoming())
+          && incoming().clickedAt == request.time
+          && exists(/databases/$(database)/documents/public_routes/$(incoming().slug))
+          && get(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.linkId == linkId
+          && get(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.isActive == true
+          && (!('expiresAt' in get(/databases/$(database)/documents/public_routes/$(incoming().slug)).data)
+              || get(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.expiresAt == null
+              || get(/databases/$(database)/documents/public_routes/$(incoming().slug)).data.expiresAt > request.time);
+        allow update: if false;
+        allow delete: if isSignedIn()
+          && isValidId(linkId)
+          && isValidId(clickId)
+          && get(/databases/$(database)/documents/links/$(linkId)).data.userId == request.auth.uid;
+      }
+    }
+
+    match /public_routes/{slug} {
+      allow get: if isValidSlug(slug);
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidSlug(slug)
+        && isValidPublicRoute(incoming())
+        && incoming().slug == slug
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/links/$(incoming().linkId))
+        && getAfter(/databases/$(database)/documents/links/$(incoming().linkId)).data.userId == request.auth.uid;
+      allow update: if isSignedIn()
+        && isValidSlug(slug)
+        && isValidPublicRoute(incoming())
+        && incoming().slug == existing().slug
+        && incoming().linkId == existing().linkId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && get(/databases/$(database)/documents/links/$(existing().linkId)).data.userId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['originalUrl', 'isActive', 'expiresAt', 'updatedAt']);
+      allow delete: if isSignedIn()
+        && isValidSlug(slug)
+        && get(/databases/$(database)/documents/links/$(existing().linkId)).data.userId == request.auth.uid;
+    }
+  }
+}

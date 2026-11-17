@@ -1,0 +1,206 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated LinkVault user profile stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Optional display name",
+          "maxLength": 120
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional profile avatar URL",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "Link": {
+      "title": "Link",
+      "description": "Private owner-managed short link record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "slug": {
+          "type": "string",
+          "description": "Unique short slug",
+          "minLength": 3,
+          "maxLength": 48,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "originalUrl": {
+          "type": "string",
+          "description": "Destination URL (http/https)",
+          "minLength": 8,
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional descriptive label",
+          "maxLength": 140
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether redirects are active"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional expiration timestamp"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": ["id", "userId", "slug", "originalUrl", "isActive", "createdAt", "updatedAt"]
+    },
+    "PublicRoute": {
+      "title": "PublicRoute",
+      "description": "Zero-PII public slug lookup record for short-link redirects and uniqueness enforcement.",
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 48,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "linkId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "originalUrl": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 2048
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["slug", "linkId", "originalUrl", "isActive", "createdAt", "updatedAt"]
+    },
+    "LinkClick": {
+      "title": "LinkClick",
+      "description": "Individual visitor click event recorded under a link.",
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 48,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "clickedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "referrer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "browser": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "os": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "deviceCategory": {
+          "type": "string",
+          "enum": ["Desktop", "Mobile", "Tablet", "Bot"]
+        },
+        "country": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "ipHash": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "required": ["slug", "clickedAt", "referrer", "browser", "os", "deviceCategory", "country"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile documents isolated per authenticated owner."
+    },
+    "/links/{linkId}": {
+      "schema": { "$ref": "#/entities/Link" },
+      "description": "Private link metadata owned and queried strictly by userId."
+    },
+    "/links/{linkId}/clicks/{clickId}": {
+      "schema": { "$ref": "#/entities/LinkClick" },
+      "description": "Timestamped visitor click events scoped under each link."
+    },
+    "/public_routes/{slug}": {
+      "schema": { "$ref": "#/entities/PublicRoute" },
+      "description": "Public zero-PII redirect lookup documents keyed by unique slug."
+    }
+  }
+}
